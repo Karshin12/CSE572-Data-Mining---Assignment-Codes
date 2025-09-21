@@ -88,7 +88,7 @@ def evaluate_models(X, y, models, scale=False):
         results[name] = (scores.mean(), scores.std())
     return results
 
-print("\nEvaluating improved preprocessing (with scaling for distance-based)...")
+print("\nEvaluating improved preprocessing")
 X_imp = X_improved.copy()
 X_imp = pd.get_dummies(X_imp, drop_first=True)
 results_improved = evaluate_models(X_imp, y, models, scale=True)
