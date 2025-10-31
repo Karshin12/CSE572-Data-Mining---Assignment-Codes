@@ -1,0 +1,76 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV, cross_val_score
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.ensemble import RandomForestClassifier
+import matplotlib.pyplot as plt
+
+try:
+    train_df = pd.read_csv('train.csv')
+    print("Files loaded successfully.")
+except FileNotFoundError:
+    print("Error: Make sure 'train.csv' is in the same directory.")
+
+X = train_df.drop(['Survived', 'PassengerId'], axis=1)
+y = train_df['Survived']
+
+X = X.drop(['Ticket'], axis=1)
+X['Deck'] = X['Cabin'].str[0].fillna('U')
+X['Title'] = X.Name.str.extract(' ([A-Za-z]+)\.', expand=False)
+X['Title'] = X['Title'].replace(['Lady', 'Countess','Capt', 'Col',\
+ 	'Don', 'Dr', 'Major', 'Rev', 'Sir', 'Jonkheer', 'Dona'], 'Rare')
+X['Title'] = X['Title'].replace(['Mlle', 'Ms'], 'Miss')
+X['Title'] = X['Title'].replace('Mme', 'Mrs')
+
+title_mapping = {"Mr": 1, "Miss": 2, "Mrs": 3, "Master": 4, "Rare": 5}
+deck_mapping = {'U': 0, 'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5, 'F': 6, 'G': 7, 'T': 8}
+embarked_mapping = {'S': 0, 'C': 1, 'Q': 2}
+sex_mapping = {'female': 1, 'male': 0}
+
+X['Sex'] = X['Sex'].map(sex_mapping).astype(int)
+X['Embarked'] = X['Embarked'].fillna(X.Embarked.dropna().mode()[0])
+X['Title'] = X['Title'].map(title_mapping).fillna(0)
+X['Deck'] = X['Deck'].map(deck_mapping).fillna(0)
+X['Embarked'] = X['Embarked'].map(embarked_mapping).astype(int)
+
+X = X.drop(['Name', 'Cabin'], axis=1)
+
+X['Fare'].fillna(X['Fare'].dropna().median(), inplace=True)
+X['Age'] = X.groupby(['Sex', 'Pclass'])['Age'].transform(lambda x: x.fillna(x.median()))
+
+scaler = StandardScaler()
+X[['Age', 'Fare']] = scaler.fit_transform(X[['Age', 'Fare']])
+
+print("Data preprocessing complete.")
+
+print("\n--- Task 1.2: Fine-Tuning Decision Tree ---")
+dt_params = {'max_depth': range(1, 15)}
+dt_grid = GridSearchCV(DecisionTreeClassifier(random_state=42), param_grid=dt_params, cv=5)
+dt_grid.fit(X, y)
+
+best_depth = dt_grid.best_params_['max_depth']
+print(f"Best max_depth found: {best_depth}")
+
+final_dt = dt_grid.best_estimator_
+plt.figure(figsize=(20, 10))
+plot_tree(final_dt, filled=True, feature_names=X.columns.tolist(), class_names=['Died', 'Survived'], max_depth=3)
+plt.title(f"Fine-Tuned Decision Tree (Showing Top 3 Levels of {best_depth} Total)")
+plt.show()
+
+print("\n--- Task 1.3: Decision Tree 5-Fold CV Accuracy ---")
+dt_cv_scores = cross_val_score(final_dt, X, y, cv=5)
+print(f"Decision Tree 5-Fold CV Scores: {dt_cv_scores}")
+print(f"Average DT Accuracy: {np.mean(dt_cv_scores) * 100:.2f}%")
+
+print("\n--- Task 1.4: Random Forest 5-Fold CV Accuracy ---")
+rf_params = {'n_estimators': [50, 100, 150], 'max_depth': [5, 8, 10]}
+rf_grid = GridSearchCV(RandomForestClassifier(random_state=42), param_grid=rf_params, cv=5)
+rf_grid.fit(X, y)
+final_rf = rf_grid.best_estimator_
+
+print(f"Best Random Forest parameters found: {rf_grid.best_params_}")
+
+rf_cv_scores = cross_val_score(final_rf, X, y, cv=5)
+print(f"Random Forest 5-Fold CV Scores: {rf_cv_scores}")
+print(f"Average RF Accuracy: {np.mean(rf_cv_scores) * 100:.2f}%")
