@@ -1,0 +1,41 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+data = {
+    'Point': ["P1' (-)", "P2' (+)", "P3' (+)", "P4' (-)"],
+    'z1 (x1)': [-1, -1, 1, 1],
+    'z2 (x1*x2)': [1, -1, -1, 1],
+    'Class': ['Negative', 'Positive', 'Positive', 'Negative']
+}
+df = pd.DataFrame(data)
+
+plt.figure(figsize=(8, 6))
+
+neg = df[df['Class'] == 'Negative']
+pos = df[df['Class'] == 'Positive']
+
+plt.scatter(neg['z1 (x1)'], neg['z2 (x1*x2)'], c='red', marker='x', s=100, label='Negative Class')
+plt.scatter(pos['z1 (x1)'], pos['z2 (x1*x2)'], c='blue', marker='o', s=100, label='Positive Class')
+
+for i, row in df.iterrows():
+    plt.text(row['z1 (x1)'] + 0.1, row['z2 (x1*x2)'], row['Point'], fontsize=12)
+
+z1_vals = np.linspace(-2, 2, 10)
+plt.plot(z1_vals, z1_vals * 0, 'k-', linewidth=2, label='Maximal Margin Separator (z2 = 0)')
+plt.plot(z1_vals, z1_vals * 0 + 1, 'k--', linewidth=1.5, label='Support Vector Hyperplane (z2 = 1)')
+plt.plot(z1_vals, z1_vals * 0 - 1, 'k--', linewidth=1.5, label='Support Vector Hyperplane (z2 = -1)')
+
+plt.title('SVM in Mapped Feature Space (z1 vs z2)', fontsize=14)
+plt.xlabel('z1 = x1', fontsize=12)
+plt.ylabel('z2 = x1 * x2', fontsize=12)
+
+plt.legend(loc='upper right', fontsize='x-small')
+
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.axhline(0, color='grey', lw=0.5)
+plt.axvline(0, color='grey', lw=0.5)
+plt.xlim(-2, 2)
+plt.ylim(-2, 2)
+
+plt.show()
