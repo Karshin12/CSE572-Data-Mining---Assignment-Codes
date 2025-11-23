@@ -1,0 +1,213 @@
+import numpy as np
+import pandas as pd
+import time
+import warnings
+
+warnings.filterwarnings("ignore")
+
+def generalized_jaccard_dist(a, b):
+    dot_product = np.dot(a, b)
+    denom = (np.sum(a**2) + np.sum(b**2) - dot_product)
+    
+    if denom == 0: return 1.0
+    similarity = dot_product / denom
+    
+    similarity = max(0.0, min(1.0, similarity))
+    return 1.0 - similarity
+
+def cosine_dist(a, b):
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    
+    if norm_a == 0 or norm_b == 0: return 1.0
+    
+    similarity = np.dot(a, b) / (norm_a * norm_b)
+    return 1.0 - similarity
+
+def euclidean_dist(a, b):
+    return np.linalg.norm(a - b)
+
+class KMeansCustom:
+    def __init__(self, k, metric='euclidean', max_iter=500, 
+                 stop_condition='combined', random_state=42):
+        self.k = k
+        self.metric = metric
+        self.max_iter = max_iter
+        self.stop_condition = stop_condition 
+        self.random_state = random_state
+        self.centroids = None
+        self.sse_history = []
+        self.iterations_run = 0
+
+    def _distance(self, a, b):
+        if self.metric == 'euclidean': return euclidean_dist(a, b)
+        elif self.metric == 'cosine': return cosine_dist(a, b)
+        elif self.metric == 'jaccard': return generalized_jaccard_dist(a, b)
+        return euclidean_dist(a, b)
+
+    def fit(self, X):
+        np.random.seed(self.random_state)
+        indices = np.random.choice(X.shape[0], self.k, replace=False)
+        self.centroids = X[indices]
+        
+        prev_sse = float('inf')
+        
+        for i in range(self.max_iter):
+            self.iterations_run = i + 1
+            
+            labels = self._assign_clusters(X)
+            
+            current_sse = 0
+            for idx, point in enumerate(X):
+                current_sse += self._distance(point, self.centroids[labels[idx]])**2
+            self.sse_history.append(current_sse)
+
+            sse_increased = current_sse > prev_sse
+
+            new_centroids = np.zeros_like(self.centroids)
+            counts = np.zeros(self.k)
+            for idx, label in enumerate(labels):
+                new_centroids[label] += X[idx]
+                counts[label] += 1
+            
+            for j in range(self.k):
+                if counts[j] > 0:
+                    new_centroids[j] /= counts[j]
+                else:
+                    new_centroids[j] = self.centroids[j] 
+
+            centroid_no_change = np.allclose(self.centroids, new_centroids, atol=1e-4)
+
+            max_iter_reached = (i == self.max_iter - 1)
+
+            should_stop = False
+            
+            if self.stop_condition == 'combined':
+                if centroid_no_change or sse_increased or max_iter_reached:
+                    should_stop = True
+            
+            elif self.stop_condition == 'centroid':
+                if centroid_no_change: should_stop = True
+                
+            elif self.stop_condition == 'sse':
+                if sse_increased: should_stop = True
+
+            elif self.stop_condition == 'iteration':
+                if max_iter_reached: should_stop = True
+
+            if should_stop:
+                break
+            
+            prev_sse = current_sse
+            self.centroids = new_centroids
+
+    def _assign_clusters(self, X):
+        labels = []
+        for point in X:
+            dists = [self._distance(point, c) for c in self.centroids]
+            labels.append(np.argmin(dists))
+        return np.array(labels)
+
+    def predict(self, X):
+        return self._assign_clusters(X)
+    
+    def get_sse(self):
+        return self.sse_history[-1] if self.sse_history else 0
+
+def get_accuracy(true_labels, cluster_labels, k):
+    cluster_to_true = {}
+    
+    for i in range(k):
+        indices = np.where(cluster_labels == i)[0]
+        if len(indices) == 0: continue
+        
+        true_labels_in_cluster = true_labels[indices]
+        vals, counts = np.unique(true_labels_in_cluster, return_counts=True)
+        majority_label = vals[np.argmax(counts)]
+        cluster_to_true[i] = majority_label
+
+    correct = 0
+    for idx, c_label in enumerate(cluster_labels):
+        if c_label in cluster_to_true:
+            if cluster_to_true[c_label] == true_labels[idx]:
+                correct += 1
+    
+    return correct / len(true_labels)
+
+if __name__ == "__main__":
+    
+    print("--- TASK 1: ALGORITHMIC ANALYSIS ---")
+
+    filename = 'data.csv' 
+    labelname = 'label.csv'
+    try:
+        X_df = pd.read_csv(filename, header=None)
+        X = X_df.values.astype(float)
+
+        y_df = pd.read_csv(labelname, header=None)
+        y = y_df.values.flatten() 
+        
+        unique_classes = np.unique(y)
+        K = len(unique_classes)
+        
+        print(f"DEBUG: Data Loaded. X shape: {X.shape}, y shape: {y.shape}")
+        print(f"DEBUG: Found K={K} unique classes.")
+
+    except Exception as e:
+        print(f"CRITICAL ERROR LOADING DATA: {e}")
+        from sklearn.datasets import make_blobs
+        X, y = make_blobs(n_samples=500, centers=10, n_features=10, random_state=42)
+        K = 10
+
+    metrics = ['euclidean', 'cosine', 'jaccard']
+    results = {}
+
+    print(f"\nQ1: Run K-means (K={K}) with Euclidean, Cosine, Jaccard. Compare SSE.")
+    
+    for m in metrics:
+        model = KMeansCustom(k=K, metric=m, stop_condition='combined') 
+        model.fit(X)
+        results[m] = {'model': model, 'sse': model.get_sse()}
+        print(f"{m.capitalize()} SSE: {model.get_sse():.4f}")
+    
+    best_sse_metric = min(results, key=lambda x: results[x]['sse'])
+    print(f"Solution: '{best_sse_metric}' has the lowest SSE.")
+
+    print(f"\nQ2: Compare Accuracies (Majority Vote Labeling).")
+    for m in metrics:
+        model = results[m]['model']
+        pred_labels = model.predict(X)
+        acc = get_accuracy(y, pred_labels, K)
+        results[m]['acc'] = acc
+        print(f"{m.capitalize()} K-Means Accuracy: {acc:.4f}")
+        
+    best_acc_metric = max(results, key=lambda x: results[x]['acc'])
+    print(f"Solution: Best clustering accuracy was achieved using: {best_acc_metric}.")
+
+    print(f"\nQ3: Convergence Speed (Iterations & Time) for each stop criteria.")
+    
+    stop_modes = ['centroid', 'sse', 'iteration']
+    
+    for mode in stop_modes:
+        print(f"\n--- Using stop mode: '{mode}' ---")
+        current_max_iter = 100 if mode == 'iteration' else 500
+        
+        for m in metrics:
+            start_time = time.time()
+            model = KMeansCustom(k=K, metric=m, max_iter=current_max_iter, stop_condition=mode)
+            model.fit(X)
+            elapsed = time.time() - start_time
+            print(f"{m.capitalize()} -> Time: {elapsed:.4f}s, Iterations: {model.iterations_run}")
+        
+    print("Solution: Compare the iterations above to see which requires more.")
+
+    print(f"\nQ4: Compare SSEs with respect to the three terminating conditions.")
+    
+    for mode in stop_modes:
+        print(f"\n--- Condition: {mode} ---")
+        current_max_iter = 100 if mode == 'iteration' else 500
+        
+        for m in metrics:
+            model = KMeansCustom(k=K, metric=m, max_iter=current_max_iter, stop_condition=mode)
+            model.fit(X)
+            print(f"{m.capitalize():<10} : SSE = {model.get_sse():.4f}")
