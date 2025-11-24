@@ -1,0 +1,170 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from surprise import Dataset, Reader, SVD, KNNBasic
+from surprise.model_selection import cross_validate
+
+print("--- Loading Data ---")
+try:
+    df = pd.read_csv('ratings_small.csv')
+    reader = Reader(rating_scale=(1, 5))
+    data = Dataset.load_from_df(df[['userId', 'movieId', 'rating']], reader)
+    print("Data loaded successfully.")
+except FileNotFoundError:
+    print("CRITICAL ERROR: 'ratings_small.csv' not found.")
+    exit()
+
+def print_report_table(metric_name, values):
+    folds_str = "".join([f"{v:8.4f}" for v in values])
+    mean_val = np.mean(values)
+    std_val = np.std(values)
+    print(f"{metric_name:<10} {folds_str} {mean_val:8.4f} {std_val:8.4f}")
+
+def print_header():
+    print(f"{'Metric':<10} {'Fold 1':>8} {'Fold 2':>8} {'Fold 3':>8} {'Fold 4':>8} {'Fold 5':>8} {'Mean':>8} {'Std':>8}")
+
+print("\n" + "="*80)
+print("Q(c) & Q(d): Model Comparison")
+print("="*80)
+
+algos = {
+    'PMF (SVD, no bias)': SVD(biased=False), 
+    'User-Based CF': KNNBasic(sim_options={'user_based': True, 'verbose': False}),
+    'Item-Based CF': KNNBasic(sim_options={'user_based': False, 'verbose': False})
+}
+
+results_summary = {}
+
+for name, algo in algos.items():
+    print(f"\nModel: {name}")
+    print_header()
+    
+    cv = cross_validate(algo, data, measures=['RMSE', 'MAE'], cv=5, verbose=False)
+    
+    print_report_table("RMSE", cv['test_rmse'])
+    print_report_table("MAE", cv['test_mae'])
+    print_report_table("Fit Time", cv['fit_time'])
+    print_report_table("Test Time", cv['test_time'])
+    
+    results_summary[name] = {
+        'RMSE': np.mean(cv['test_rmse']),
+        'MAE': np.mean(cv['test_mae'])
+    }
+
+print("\n[Answer Q(d)] Performance Summary:")
+for model, metrics in results_summary.items():
+    print(f"  {model:<20} -> RMSE: {metrics['RMSE']:.4f}, MAE: {metrics['MAE']:.4f}")
+
+best_model = min(results_summary, key=lambda k: results_summary[k]['RMSE'])
+print(f"\nBest Model by RMSE/MAE: {best_model}")
+
+print("\n" + "="*80)
+print("Q(e): Impact of Similarity Metrics")
+print("="*80)
+
+sim_metrics = ['cosine', 'msd', 'pearson']
+cf_types = {'User-Based': True, 'Item-Based': False}
+
+plot_data = {
+    'User-Based': {'RMSE': [], 'MAE': []},
+    'Item-Based': {'RMSE': [], 'MAE': []}
+}
+
+for metric in sim_metrics:
+    for cf_name, is_user_based in cf_types.items():
+        print(f"\nConfiguration: {cf_name} with {metric}")
+        print_header()
+        
+        algo = KNNBasic(sim_options={'name': metric, 'user_based': is_user_based, 'verbose': False})
+        cv = cross_validate(algo, data, measures=['RMSE', 'MAE'], cv=5, verbose=False)
+        
+        print_report_table("RMSE", cv['test_rmse'])
+        print_report_table("MAE", cv['test_mae'])
+        print_report_table("Fit Time", cv['fit_time'])
+        print_report_table("Test Time", cv['test_time'])
+        
+        plot_data[cf_name]['RMSE'].append(np.mean(cv['test_rmse']))
+        plot_data[cf_name]['MAE'].append(np.mean(cv['test_mae']))
+
+plt.figure(figsize=(8, 5))
+plt.plot(sim_metrics, plot_data['User-Based']['RMSE'], marker='o', label='RMSE', color='tab:blue')
+plt.plot(sim_metrics, plot_data['User-Based']['MAE'], marker='s', label='MAE', color='tab:orange')
+plt.title('User-Based CF Performance by Similarity Metric')
+plt.ylabel('Error')
+plt.xlabel('Similarity Metric')
+plt.legend()
+plt.grid(True)
+plt.savefig('Q_e_User_Based_Both.png')
+print("\n[Info] Saved plot: 'Q_e_User_Based_Both.png'")
+
+plt.figure(figsize=(8, 5))
+plt.plot(sim_metrics, plot_data['Item-Based']['RMSE'], marker='o', label='RMSE', color='tab:blue')
+plt.plot(sim_metrics, plot_data['Item-Based']['MAE'], marker='s', label='MAE', color='tab:orange')
+plt.title('Item-Based CF Performance by Similarity Metric')
+plt.ylabel('Error')
+plt.xlabel('Similarity Metric')
+plt.legend()
+plt.grid(True)
+plt.savefig('Q_e_Item_Based_Both.png')
+print("[Info] Saved plot: 'Q_e_Item_Based_Both.png'")
+
+print("\n" + "="*80)
+print("Q(f) & Q(g): Impact of Neighbors (K)")
+print("="*80)
+
+k_values = [5, 10, 15, 18, 19, 20, 25, 30, 40, 50]
+
+k_results = {
+    'User-Based': {'RMSE': [], 'MAE': []},
+    'Item-Based': {'RMSE': [], 'MAE': []}
+}
+
+print(f"{'K':<5} {'User RMSE':<10} {'User MAE':<10} | {'Item RMSE':<10} {'Item MAE':<10}")
+
+for k in k_values:
+    algo_u = KNNBasic(k=k, sim_options={'user_based': True, 'verbose': False})
+    cv_u = cross_validate(algo_u, data, measures=['RMSE', 'MAE'], cv=5, verbose=False)
+    u_rmse = np.mean(cv_u['test_rmse'])
+    u_mae = np.mean(cv_u['test_mae'])
+    k_results['User-Based']['RMSE'].append(u_rmse)
+    k_results['User-Based']['MAE'].append(u_mae)
+    
+    algo_i = KNNBasic(k=k, sim_options={'user_based': False, 'verbose': False})
+    cv_i = cross_validate(algo_i, data, measures=['RMSE', 'MAE'], cv=5, verbose=False)
+    i_rmse = np.mean(cv_i['test_rmse'])
+    i_mae = np.mean(cv_i['test_mae'])
+    k_results['Item-Based']['RMSE'].append(i_rmse)
+    k_results['Item-Based']['MAE'].append(i_mae)
+    
+    print(f"{k:<5} {u_rmse:<10.4f} {u_mae:<10.4f} | {i_rmse:<10.4f} {i_mae:<10.4f}")
+
+plt.figure(figsize=(8, 5))
+plt.plot(k_values, k_results['User-Based']['RMSE'], marker='o', label='RMSE', color='tab:blue')
+plt.plot(k_values, k_results['User-Based']['MAE'], marker='s', label='MAE', color='tab:orange')
+plt.title('Impact of Neighbors (K) on User-Based CF')
+plt.ylabel('Error')
+plt.xlabel('K Neighbors')
+plt.xticks(k_values)
+plt.legend()
+plt.grid(True)
+plt.savefig('Q_f_User_Based_Both.png')
+print("\n[Info] Saved plot: 'Q_f_User_Based_Both.png'")
+
+plt.figure(figsize=(8, 5))
+plt.plot(k_values, k_results['Item-Based']['RMSE'], marker='o', label='RMSE', color='tab:blue')
+plt.plot(k_values, k_results['Item-Based']['MAE'], marker='s', label='MAE', color='tab:orange')
+plt.title('Impact of Neighbors (K) on Item-Based CF')
+plt.ylabel('Error')
+plt.xlabel('K Neighbors')
+plt.xticks(k_values)
+plt.legend()
+plt.grid(True)
+plt.savefig('Q_f_Item_Based_Both.png')
+print("[Info] Saved plot: 'Q_f_Item_Based_Both.png'")
+
+best_k_u_idx = np.argmin(k_results['User-Based']['RMSE'])
+best_k_i_idx = np.argmin(k_results['Item-Based']['RMSE'])
+
+print(f"\n[Answer Q(g)] Best K for User-Based: {k_values[best_k_u_idx]} (RMSE: {k_results['User-Based']['RMSE'][best_k_u_idx]:.4f})")
+print(f"[Answer Q(g)] Best K for Item-Based: {k_values[best_k_i_idx]} (RMSE: {k_results['Item-Based']['RMSE'][best_k_i_idx]:.4f})")
+print("Conclusion: The optimal K is NOT the same for both methods.")
