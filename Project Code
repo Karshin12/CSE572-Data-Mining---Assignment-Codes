@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # LOAD DATASET
-df = pd.read_csv("/Users/harshinigande/Downloads/SpotifyFeatures.csv")
+df = pd.read_csv("/content/SpotifyFeatures.csv")
 
 # SELECT NUMERIC AUDIO FEATURES
 features = [
@@ -307,26 +307,6 @@ if len(np.unique(labels_agg)) > 1:
 else:
     print("\nAgglomerative produced fewer than 2 clusters; DBI/CH not defined.")
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-
-df = pd.read_csv("/content/SpotifyFeatures.csv")
-
-features = [
-    "acousticness","danceability","duration_ms","energy",
-    "instrumentalness","liveness","loudness","speechiness",
-    "tempo","valence"
-]
-
-X = df[features].dropna().values.astype(float)
-
-# Standardize manually
-mean = X.mean(axis=0)
-std = X.std(axis=0)
-X_scaled = (X - mean) / std
-
-print("Full dataset:", X_scaled.shape)
 np.random.seed(42)
 sample_size = 5000
 idx_sample = np.random.choice(len(X_scaled), sample_size, replace=False)
