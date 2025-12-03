@@ -1,0 +1,479 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# LOAD DATASET
+df = pd.read_csv("/Users/harshinigande/Downloads/SpotifyFeatures.csv")
+
+# SELECT NUMERIC AUDIO FEATURES
+features = [
+    "acousticness","danceability","duration_ms","energy",
+    "instrumentalness","liveness","loudness","speechiness",
+    "tempo","valence"
+]
+
+X = df[features].dropna().values.astype(float)
+
+# STANDARDIZE
+mean = X.mean(axis=0)
+std = X.std(axis=0)
+X_scaled = (X - mean) / std
+
+print("Dataset shape:", X_scaled.shape)
+
+# K-MEANS
+
+k = 10
+max_iters = 100
+
+np.random.seed(42)
+indices = np.random.choice(len(X_scaled), k, replace=False)
+centroids = X_scaled[indices]
+
+for iteration in range(max_iters):
+
+    # Assign step
+    distances = np.linalg.norm(X_scaled[:, None] - centroids, axis=2)
+    labels = np.argmin(distances, axis=1)
+
+    # Update step
+    new_centroids = np.zeros_like(centroids)
+    for c in range(k):
+        cluster_points = X_scaled[labels == c]
+        new_centroids[c] = cluster_points.mean(axis=0)
+
+    # Convergence check
+    if np.allclose(centroids, new_centroids):
+        print("Converged at iteration", iteration)
+        break
+
+    centroids = new_centroids
+
+print("K-Means training completed.")
+
+# ---- SSE ----
+def sse_score(X, labels, centroids):
+    sse = 0
+    for c in range(len(centroids)):
+        pts = X[labels == c]
+        sse += np.sum((pts - centroids[c])**2)
+    return sse
+
+sse = sse_score(X_scaled, labels, centroids)
+print("SSE:", sse)
+
+def davies_bouldin_index(X, labels, centroids):
+    k = len(centroids)
+    scatters = []
+
+    for c in range(k):
+        pts = X[labels == c]
+        if len(pts) == 0:
+            scatters.append(0)
+            continue
+        sc = np.mean(np.linalg.norm(pts - centroids[c], axis=1))
+        scatters.append(sc)
+
+    scatters = np.array(scatters)
+    dbi_vals = []
+
+    for i in range(k):
+        ratios = []
+        for j in range(k):
+            if i == j:
+                continue
+            dist = np.linalg.norm(centroids[i] - centroids[j])
+            ratios.append((scatters[i] + scatters[j]) / dist)
+        dbi_vals.append(max(ratios))
+
+    return np.mean(dbi_vals)
+
+dbi = davies_bouldin_index(X_scaled, labels, centroids)
+print("Davies-Bouldin Index:", dbi)
+
+def calinski_harabasz(X, labels, centroids):
+    n = len(X)
+    k = len(centroids)
+    overall_mean = X.mean(axis=0)
+
+    B = 0   # between-cluster variance
+    W = 0   # within-cluster variance
+
+    for c in range(k):
+        pts = X[labels == c]
+        n_c = len(pts)
+        if n_c == 0:
+            continue
+
+        B += n_c * np.sum((centroids[c] - overall_mean)**2)
+        W += np.sum((pts - centroids[c])**2)
+
+    return (B * (n - k)) / (W * (k - 1))
+
+ch = calinski_harabasz(X_scaled, labels, centroids)
+print("Calinski-Harabasz Score:", ch)
+
+X_centered = X_scaled - X_scaled.mean(axis=0)
+cov = np.cov(X_centered, rowvar=False)
+eigvals, eigvecs = np.linalg.eigh(cov)
+
+idx = np.argsort(eigvals)[::-1]
+components = eigvecs[:, idx][:, :2]
+
+X_pca = X_centered @ components
+
+plt.figure(figsize=(8,6))
+plt.scatter(X_pca[:20000,0], X_pca[:20000,1], c=labels[:20000], s=4, cmap="viridis")
+plt.title("K-Means Clusters (PCA Projection)")
+plt.xlabel("PC 1")
+plt.ylabel("PC 2")
+plt.colorbar(label="Cluster")
+plt.show()
+
+#GMM
+# Use a 20k sample for GMM
+np.random.seed(42)
+sample_idx = np.random.choice(len(X_scaled), 20000, replace=False)
+Xg = X_scaled[sample_idx]
+
+n, d = Xg.shape
+k = 10          # number of components
+max_iters = 30  # EM iterations
+np.random.seed(42)
+means = Xg[np.random.choice(n, k, replace=False)]
+covs = np.array([np.ones(d) for _ in range(k)])  # diag covariance
+weights = np.ones(k) / k
+# ===== METRICS FOR GMM (20k SAMPLE) =====
+
+# ===== GMM METRICS (USING SKLEARN ON THE SAME 20K SAMPLE) =====
+
+import numpy as np
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import davies_bouldin_score, calinski_harabasz_score
+
+print("Fitting sklearn GMM on the 20k sample for metrics...")
+
+# Xg should already be defined as your 20k sample:
+# sample_idx = np.random.choice(len(X_scaled), 20000, replace=False)
+# Xg = X_scaled[sample_idx]
+
+gmm_sk = GaussianMixture(
+    n_components=10,
+    covariance_type="diag",
+    random_state=42,
+    max_iter=100
+)
+gmm_sk.fit(Xg)
+
+labels_gmm = gmm_sk.predict(Xg)      # cluster labels for each of the 20k points
+means_gmm  = gmm_sk.means_           # (10, 10) means for each component
+
+print("Sklearn GMM fitted. Computing metrics...")
+
+# ---- SSE for GMM ----
+def sse_gmm_score(X, labels, means):
+    sse = 0.0
+    for c in range(means.shape[0]):
+        pts = X[labels == c]
+        if len(pts) == 0:
+            continue
+        sse += np.sum((pts - means[c])**2)
+    return sse
+
+sse_gmm = sse_gmm_score(Xg, labels_gmm, means_gmm)
+
+# ---- DBI & CH ----
+dbi_gmm = davies_bouldin_score(Xg, labels_gmm)
+ch_gmm  = calinski_harabasz_score(Xg, labels_gmm)
+
+print("\n========== GMM METRICS (20k SAMPLE, SKLEARN) ==========")
+print(f"SSE (GMM): {sse_gmm}")
+print(f"Davies–Bouldin (GMM): {dbi_gmm}")
+print(f"Calinski–Harabasz (GMM): {ch_gmm}")
+
+# ===== Gaussian PDF (diag cov) =====
+def gaussian_diag(x, mean, var):
+    return np.exp(-0.5 * np.sum((x-mean)**2 / var)) / np.sqrt((2*np.pi)**len(x) * np.prod(var))
+
+
+# ===========================================
+# 3. EM ALGORITHM (MANUAL)
+# ===========================================
+
+for iteration in range(max_iters):
+
+    # ---------- E-Step ----------
+    resp = np.zeros((n, k))
+
+    for i in range(k):
+        resp[:, i] = weights[i] * np.array([gaussian_diag(x, means[i], covs[i]) for x in Xg])
+
+    resp = resp / resp.sum(axis=1, keepdims=True)
+
+    # ---------- M-Step ----------
+    Nk = resp.sum(axis=0)
+
+    for i in range(k):
+        # mean update
+        means[i] = np.sum(resp[:, i][:, None] * Xg, axis=0) / Nk[i]
+
+        # variance update (diag)
+        diff = Xg - means[i]
+        covs[i] = np.sum(resp[:, i][:, None] * (diff**2), axis=0) / Nk[i]
+
+    weights = Nk / n
+
+    print("Iteration:", iteration+1)
+
+print("GMM Training Completed (20k sample).")
+
+# Final cluster assignments
+labels = np.argmax(resp, axis=1)
+centroids = means.copy() 
+
+# ===== PCA (manual) =====
+X_centered = Xg - Xg.mean(axis=0)
+cov = np.cov(X_centered, rowvar=False)
+eigvals, eigvecs = np.linalg.eigh(cov)
+
+idx = np.argsort(eigvals)[::-1]
+components = eigvecs[:, idx][:, :2]
+
+X_pca = X_centered @ components
+
+# ===== Plot =====
+plt.figure(figsize=(8,6))
+plt.scatter(X_pca[:,0], X_pca[:,1], c=labels, s=5, cmap='viridis')
+plt.title("GMM Clusters (20k sample) - PCA Projection")
+plt.xlabel("PC1")
+plt.ylabel("PC2")
+plt.colorbar()
+plt.show()
+
+np.random.seed(42)
+sample_size = 20000
+idx_sample = np.random.choice(len(X_scaled), sample_size, replace=False)
+X_ag = X_scaled[idx_sample]
+
+print("Agglomerative sample:", X_ag.shape)
+
+# ===========================================
+# AGGLOMERATIVE CLUSTERING (SINGLE-LINKAGE)
+# ===========================================
+
+# initial: each point is its own cluster
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics import davies_bouldin_score, calinski_harabasz_score
+import numpy as np
+
+# Use a smaller sample to avoid RAM issues
+np.random.seed(42)
+sample_size = 20000   
+idx_agg = np.random.choice(len(X_scaled), sample_size, replace=False)
+X_agg = X_scaled[idx_agg]
+
+print("Agglomerative sample:", X_agg.shape)
+
+# Run Agglomerative using sklearn (no manual distance matrix)
+agg = AgglomerativeClustering(
+    n_clusters=10,
+    linkage='ward'   # or 'average' / 'complete' if you prefer
+)
+labels_agg = agg.fit_predict(X_agg)
+
+print("Agglomerative clustering complete.")
+print("Clusters formed:", len(np.unique(labels_agg)))
+
+# ---- Metrics for Agglomerative ----
+def sse_agg_score(X, labels):
+    sse = 0.0
+    for c in np.unique(labels):
+        pts = X[labels == c]
+        if len(pts) == 0:
+            continue
+        centroid = pts.mean(axis=0)
+        sse += np.sum((pts - centroid)**2)
+    return sse
+
+if len(np.unique(labels_agg)) > 1:
+    sse_a = sse_agg_score(X_agg, labels_agg)
+    dbi_a = davies_bouldin_score(X_agg, labels_agg)
+    ch_a  = calinski_harabasz_score(X_agg, labels_agg)
+
+    print("\n========== AGGLOMERATIVE CLUSTERING METRICS ==========")
+    print(f"SSE (Agglomerative): {sse_a}")
+    print(f"Davies–Bouldin (Agglomerative): {dbi_a}")
+    print(f"Calinski–Harabasz (Agglomerative): {ch_a}")
+else:
+    print("\nAgglomerative produced fewer than 2 clusters; DBI/CH not defined.")
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+df = pd.read_csv("/content/SpotifyFeatures.csv")
+
+features = [
+    "acousticness","danceability","duration_ms","energy",
+    "instrumentalness","liveness","loudness","speechiness",
+    "tempo","valence"
+]
+
+X = df[features].dropna().values.astype(float)
+
+# Standardize manually
+mean = X.mean(axis=0)
+std = X.std(axis=0)
+X_scaled = (X - mean) / std
+
+print("Full dataset:", X_scaled.shape)
+np.random.seed(42)
+sample_size = 5000
+idx_sample = np.random.choice(len(X_scaled), sample_size, replace=False)
+X_db = X_scaled[idx_sample]
+
+print("DB SCAN sample:", X_db.shape)
+
+eps = 1.5      # radius (tune if needed)
+min_pts = 30   # dense region threshold (tune)
+
+n = len(X_db)
+labels = -1 * np.ones(n, dtype=int)  # -1 = noise
+visited = np.zeros(n, dtype=bool)
+cluster_id = 0
+
+# Precompute full N×N distance matrix (costly but necessary)
+diff = X_db[:, None, :] - X_db[None, :, :]
+dist_matrix = np.sqrt(np.sum(diff**2, axis=2))
+
+for i in range(n):
+    if visited[i]:
+        continue
+
+    visited[i] = True
+
+    # find neighbors of X[i]
+    neighbors = np.where(dist_matrix[i] <= eps)[0]
+
+    if len(neighbors) < min_pts:
+        labels[i] = -1
+        continue
+
+    # start a new cluster
+    labels[i] = cluster_id
+    seed_set = list(neighbors)
+
+    while seed_set:
+        j = seed_set.pop()
+
+        if not visited[j]:
+            visited[j] = True
+            neighbors_j = np.where(dist_matrix[j] <= eps)[0]
+
+            if len(neighbors_j) >= min_pts:
+                for nb in neighbors_j:
+                    if nb not in seed_set:
+                        seed_set.append(nb)
+
+        if labels[j] == -1:
+            labels[j] = cluster_id
+
+    cluster_id += 1
+
+print("DBSCAN finished.")
+print("Clusters found (excluding noise):", len(np.unique(labels[labels != -1])))
+
+mask = labels != -1
+X_clust = X_db[mask]
+labels_clust = labels[mask]
+
+unique_clusters = np.unique(labels_clust)
+k = len(unique_clusters)
+
+# remap labels  → 0..k-1
+label_map = {old: new for new, old in enumerate(unique_clusters)}
+labels_mapped = np.array([label_map[l] for l in labels_clust])
+
+# compute centroids for metrics
+centroids = []
+for c in range(k):
+    pts = X_clust[labels_mapped == c]
+    centroids.append(pts.mean(axis=0))
+centroids = np.array(centroids)
+
+print("Effective clusters:", k)
+print("Points used in metrics:", X_clust.shape[0])
+
+
+def sse_score(X, labels, centroids):
+    sse = 0
+    for c in range(len(centroids)):
+        pts = X[labels == c]
+        sse += np.sum((pts - centroids[c])**2)
+    return sse
+
+def davies_bouldin_index(X, labels, centroids):
+    k = len(centroids)
+    scatters = []
+
+    for c in range(k):
+        pts = X[labels == c]
+        sc = np.mean(np.linalg.norm(pts - centroids[c], axis=1))
+        scatters.append(sc)
+
+    scatters = np.array(scatters)
+    dbi_vals = []
+
+    for i in range(k):
+        ratios = []
+        for j in range(k):
+            if i == j: continue
+            dist = np.linalg.norm(centroids[i] - centroids[j])
+            ratios.append((scatters[i] + scatters[j]) / dist)
+        dbi_vals.append(max(ratios))
+
+    return np.mean(dbi_vals)
+
+def calinski_harabasz(X, labels, centroids):
+    n = len(X)
+    k = len(centroids)
+    overall_mean = X.mean(axis=0)
+
+    B = 0
+    W = 0
+
+    for c in range(k):
+        pts = X[labels == c]
+        n_c = len(pts)
+
+        B += n_c * np.sum((centroids[c] - overall_mean)**2)
+        W += np.sum((pts - centroids[c])**2)
+
+    return (B * (n - k)) / (W * (k - 1))
+
+# compute metrics
+sse = sse_score(X_clust, labels_mapped, centroids)
+dbi = davies_bouldin_index(X_clust, labels_mapped, centroids)
+ch  = calinski_harabasz(X_clust, labels_mapped, centroids)
+
+print("\n===== DBSCAN Metrics =====")
+print("SSE:", sse)
+print("Davies-Bouldin Index:", dbi)
+print("Calinski-Harabasz Score:", ch)
+
+
+X_centered = X_clust - X_clust.mean(axis=0)
+cov = np.cov(X_centered, rowvar=False)
+eigvals, eigvecs = np.linalg.eigh(cov)
+
+idx = np.argsort(eigvals)[::-1]
+components = eigvecs[:, idx][:, :2]
+X_pca = X_centered @ components
+
+plt.figure(figsize=(8,6))
+plt.scatter(X_pca[:,0], X_pca[:,1], c=labels_mapped, s=8, cmap="viridis")
+plt.title("DBSCAN Clusters – PCA Projection (5k sample)")
+plt.xlabel("PC1")
+plt.ylabel("PC2")
+plt.colorbar(label="Cluster ID")
+plt.show()
